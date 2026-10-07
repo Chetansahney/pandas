@@ -95,6 +95,8 @@ from pandas.core.dtypes.common import (
     is_scalar,
     is_signed_integer_dtype,
     is_string_dtype,
+    may_lose_precision_as_float64,
+    mixed_int_float_is_lossy,
     needs_i8_conversion,
     pandas_dtype,
     validate_all_hashable,
@@ -6765,6 +6767,32 @@ class Index(IndexOpsMixin, PandasObject):
             ):
                 return _dtype_obj
 
+        # GH#68372: int64 paired with a float dtype has float64 as its common
+        # dtype, and float64 cannot represent every int64 exactly.  Reconciling
+        # through it makes distinct labels above 2**53 compare equal, so fall
+        # back to object as the uint64 case above does.
+        #
+        # This keys off the dtypes the values actually carry rather than
+        # ``target_dtype``, because inference reports float64 for a plain list
+        # of large Python ints, which carries no float and so loses nothing.
+        #
+        # uint64 is deliberately left out: ``com.asarray_tuplesafe`` already
+        # rounds a list of uint64-range ints to float64 before this is reached,
+        # so the values are lost upstream and object dtype cannot recover them.
+        self_values = _values_for_precision_check(self)
+        target_values = _values_for_precision_check(target)
+        if (
+            self_values is not None
+            and target_values is not None
+            and "u" not in (self_values.dtype.kind, target_values.dtype.kind)
+            and mixed_int_float_is_lossy(self_values.dtype, target_values.dtype)
+            and (
+                may_lose_precision_as_float64(self_values)
+                or may_lose_precision_as_float64(target_values)
+            )
+        ):
+            return _dtype_obj
+
         dtype = find_result_type(self.dtype, target)
         dtype = common_dtype_categorical_compat([self, target], dtype)
         return dtype
@@ -8510,6 +8538,31 @@ def droplevel_result(
             names=new_names,
             verify_integrity=False,
         )
+
+
+def _values_for_precision_check(obj: Any) -> np.ndarray | None:
+    """
+    The ndarray behind ``obj``, or None when it cannot be inspected usefully.
+
+    Used to decide whether reconciling two dtypes would round a 64-bit integer,
+    so object-dtype and uninspectable input return None to leave the ordinary
+    promotion rules in place.
+    """
+    values = getattr(obj, "_values", obj)
+    if not isinstance(values, np.ndarray):
+        try:
+            if is_list_like(values):
+                # numpy promotes a list mixing int64-range and uint64-range
+                # integers to float64, which pandas itself does not, so
+                # normalise the way the indexing paths do before reading dtype
+                values = ensure_index(values)._values
+            else:
+                values = np.asarray(values)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(values, np.ndarray) or values.dtype == object:
+        return None
+    return values
 
 
 def _unpack_nested_dtype(other: Index) -> DtypeObj:

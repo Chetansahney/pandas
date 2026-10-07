@@ -547,3 +547,74 @@ def test_view_to_datetimelike():
     res3 = idx.view("M8[h]")
     expected3 = idx.values.view("M8[h]")
     tm.assert_numpy_array_equal(res3, expected3)
+
+
+class TestInt64FloatPrecision:
+    # GH#68372: int64 and float64 reconcile through float64, which cannot
+    # represent every int64, so distinct labels above 2**53 compared equal.
+    int_label = 2**53 + 1
+    float_label = float(2**53)
+
+    @pytest.fixture
+    def int_index(self):
+        return pd.Index([self.int_label], dtype="int64")
+
+    @pytest.fixture
+    def float_index(self):
+        return pd.Index([self.float_label], dtype="float64")
+
+    def test_labels_are_distinct(self):
+        # guards the premise of every test below
+        assert self.int_label != self.float_label
+
+    def test_equals(self, int_index, float_index):
+        assert not int_index.equals(float_index)
+        assert not float_index.equals(int_index)
+
+    def test_get_indexer(self, int_index, float_index):
+        expected = np.array([-1], dtype=np.intp)
+        tm.assert_numpy_array_equal(int_index.get_indexer(float_index), expected)
+        tm.assert_numpy_array_equal(float_index.get_indexer(int_index), expected)
+
+    def test_intersection(self, int_index, float_index):
+        assert len(int_index.intersection(float_index)) == 0
+        assert len(float_index.intersection(int_index)) == 0
+
+    def test_union(self, int_index, float_index):
+        assert len(int_index.union(float_index)) == 2
+
+    def test_difference(self, int_index, float_index):
+        result = int_index.difference(float_index)
+        assert list(result) == [self.int_label]
+
+    def test_reindex_does_not_match(self, int_index, float_index):
+        values = pd.Series(["payload"], index=int_index)
+        assert values.reindex(float_index).isna().all()
+
+    def test_alignment_does_not_match(self, int_index, float_index):
+        left = pd.Series([1], index=int_index)
+        right = pd.Series([2], index=float_index)
+        assert len(left + right) == 2
+
+    def test_small_values_still_match(self):
+        # below 2**53 the cast is exact, so these must keep comparing equal
+        int_index = pd.Index([1, 2, 3], dtype="int64")
+        float_index = pd.Index([1.0, 2.0, 3.0], dtype="float64")
+
+        assert int_index.equals(float_index)
+        tm.assert_numpy_array_equal(
+            int_index.get_indexer(float_index), np.array([0, 1, 2], dtype=np.intp)
+        )
+        assert len(int_index.intersection(float_index)) == 3
+        assert len(int_index.union(float_index)) == 3
+
+    def test_exact_match_above_threshold_still_matches(self):
+        # the same magnitude on both sides is representable, so it must match
+        shared = float(2**53)
+        int_index = pd.Index([int(shared)], dtype="int64")
+        float_index = pd.Index([shared], dtype="float64")
+
+        assert int_index.equals(float_index)
+        tm.assert_numpy_array_equal(
+            int_index.get_indexer(float_index), np.array([0], dtype=np.intp)
+        )

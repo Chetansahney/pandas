@@ -28,6 +28,8 @@ from pandas.core.dtypes.common import (
     ensure_object,
     is_scalar,
     is_string_or_object_np_dtype,
+    may_lose_precision_as_float64,
+    mixed_int_float_is_lossy,
 )
 from pandas.core.dtypes.dtypes import (
     CategoricalDtype,
@@ -459,6 +461,18 @@ def array_equivalent(
         #  or `in ("O", "S", "U")`
         return _array_equivalent_object(left, right, strict_nan)
 
+    # GH#68372: comparing a 64-bit integer array against a float array promotes
+    # to float64, which cannot represent every 64-bit integer, so two distinct
+    # values above 2**53 would compare equal.  Compare as Python objects, which
+    # is exact.  This has to precede the float branch below, which would
+    # otherwise do the lossy comparison itself.
+    if mixed_int_float_is_lossy(left.dtype, right.dtype) and (
+        may_lose_precision_as_float64(left) or may_lose_precision_as_float64(right)
+    ):
+        if left.shape != right.shape:
+            return False
+        return bool(np.array_equal(left.astype(object), right.astype(object)))
+
     # NaNs can occur in float and complex arrays.
     if left.dtype.kind in "fc":
         if not (left.size and right.size):
@@ -481,6 +495,7 @@ def array_equivalent(
 
     if left.dtype == right.dtype and left.dtype.kind != "V":
         return lib.array_equivalent_bytes(left, right)
+
     return np.array_equal(left, right)
 
 

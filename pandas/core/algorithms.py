@@ -33,6 +33,7 @@ from pandas.core.dtypes.cast import (
     np_find_common_type,
 )
 from pandas.core.dtypes.common import (
+    FLOAT64_INT_EXACT_MAX,
     ensure_float64,
     ensure_object,
     ensure_platform_int,
@@ -48,6 +49,7 @@ from pandas.core.dtypes.common import (
     is_list_like,
     is_object_dtype,
     is_signed_integer_dtype,
+    may_lose_precision_as_float64,
     needs_i8_conversion,
 )
 from pandas.core.dtypes.concat import concat_compat
@@ -505,22 +507,9 @@ _MINIMUM_COMP_ARR_LEN = 1_000_000
 
 # Integers with magnitude <= 2**53 are exactly representable as float64; above
 # this a 64-bit int cast to float64 may collide with a distinct value.
-_FLOAT64_INT_EXACT_MAX = 2**53
-
-
-def _may_lose_precision_as_float64(arr: np.ndarray) -> bool:
-    """
-    Whether casting ``arr`` to float64 could change an integer's identity.
-
-    Only 64-bit integers can carry a magnitude that float64 cannot represent
-    exactly; narrower widths always round-trip.
-    """
-    if arr.dtype.kind not in "iu" or arr.dtype.itemsize < 8 or arr.size == 0:
-        return False
-    return (
-        int(arr.min()) < -_FLOAT64_INT_EXACT_MAX
-        or int(arr.max()) > _FLOAT64_INT_EXACT_MAX
-    )
+# These now live in pandas.core.dtypes.common so the Index paths can share them.
+_FLOAT64_INT_EXACT_MAX = FLOAT64_INT_EXACT_MAX
+_may_lose_precision_as_float64 = may_lose_precision_as_float64
 
 
 def isin(comps: ListLike, values: ListLike) -> npt.NDArray[np.bool_]:

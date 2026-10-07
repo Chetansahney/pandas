@@ -1945,6 +1945,40 @@ def is_all_strings(value: ArrayLike) -> bool:
     return dtype == "string"
 
 
+FLOAT64_INT_EXACT_MAX = 2**53
+
+
+def may_lose_precision_as_float64(arr: np.ndarray) -> bool:
+    """
+    Whether casting ``arr`` to float64 could change an integer's identity.
+
+    Only 64-bit integers can carry a magnitude that float64 cannot represent
+    exactly; narrower widths always round-trip.
+    """
+    if arr.dtype.kind not in "iu" or arr.dtype.itemsize < 8 or arr.size == 0:
+        return False
+    return (
+        int(arr.min()) < -FLOAT64_INT_EXACT_MAX
+        or int(arr.max()) > FLOAT64_INT_EXACT_MAX
+    )
+
+
+def mixed_int_float_is_lossy(left: DtypeObj, right: DtypeObj) -> bool:
+    """
+    Whether reconciling ``left`` and ``right`` has to go through a lossy float64.
+
+    Only a 64-bit integer paired with a float is at risk; narrower integers
+    round-trip through float64 exactly.
+    """
+    if not (isinstance(left, np.dtype) and isinstance(right, np.dtype)):
+        return False
+    if left.kind in "iu" and right.kind == "f":
+        return left.itemsize >= 8
+    if left.kind == "f" and right.kind in "iu":
+        return right.itemsize >= 8
+    return False
+
+
 __all__ = [
     "DT64NS_DTYPE",
     "INT64_DTYPE",
@@ -1995,6 +2029,8 @@ __all__ = [
     "is_timedelta64_dtype",
     "is_timedelta64_ns_dtype",
     "is_unsigned_integer_dtype",
+    "may_lose_precision_as_float64",
+    "mixed_int_float_is_lossy",
     "needs_i8_conversion",
     "pandas_dtype",
     "validate_all_hashable",
