@@ -107,6 +107,19 @@ class TestDatetimeIndexShift:
         expected = pd.Series(index=idx[1:], dtype=object)
         tm.assert_series_equal(result, expected)
 
+    @pytest.mark.parametrize("start", ["2024-03-31 00:00", "2024-10-27 00:00"])
+    def test_dti_shift_dateoffset_across_dst(self, start, unit):
+        # GH#57837 shifting by a DateOffset with only sub-daily components
+        #  raised on the nonexistent or ambiguous wall time; it moves each
+        #  timestamp by an absolute hour, like the equivalent Timedelta
+        idx = pd.date_range(start, periods=5, freq="h", tz="UTC", unit=unit).tz_convert(
+            "Europe/Amsterdam"
+        )
+        ser = pd.Series(range(4), index=idx[:-1])
+        result = ser.shift(freq=pd.DateOffset(hours=1))
+        expected = pd.Series(range(4), index=idx[1:]._with_freq(None))
+        tm.assert_series_equal(result, expected)
+
     @pytest.mark.parametrize(
         "shift, result_time",
         [
